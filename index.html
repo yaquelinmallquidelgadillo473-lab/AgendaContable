@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agenda de Consultorías</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+  
+  * {
+    font-family: 'Inter', sans-serif;
+  }
+  
+  body {
+    background: #0f172a;
+  }
+  
+  .calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 1px;
+    background: #1e293b;
+  }
+  
+  .calendar-day {
+    background: #0f172a;
+    min-height: 110px;
+    transition: all 0.2s ease;
+  }
+  
+  .calendar-day:hover:not(.disabled) {
+    background: #1e293b;
+    transform: scale(1.02);
+    box-shadow: 0 0 0 2px #3b82f6 inset;
+    z-index: 10;
+  }
+  
+  .calendar-day.has-appointments {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e293b 100%);
+    border-left: 3px solid #3b82f6;
+  }
+  
+  .calendar-day.today {
+    background: #172554;
+    box-shadow: 0 0 0 2px #60a5fa inset;
+  }
+  
+  .calendar-day.filtered-available {
+    background: linear-gradient(135deg, #064e3b 0%, #0f172a 100%);
+    box-shadow: 0 0 0 2px #10b981 inset;
+  }
+  
+  .calendar-day.filtered-busy {
+    background: linear-gradient(135deg, #7f1d1d 0%, #0f172a 100%);
+    box-shadow: 0 0 0 2px #ef4444 inset;
+  }
+  
+  .modal-backdrop {
+    backdrop-filter: blur(8px);
+    background: rgba(15, 23, 42, 0.9);
+  }
+  
+  .input-error {
+    border-color: #ef4444 !important;
+    animation: shake 0.3s ease;
+  }
+  
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+  }
+  
+  .fade-in {
+    animation: fadeIn 0.3s ease;
+  }
+  
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: #1e293b;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 4px;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+  }
+  
+  @media (max-width: 768px) {
+    .calendar-day {
+      min-height: 80px;
+      font-size: 0.875rem;
+    }
+    .calendar-day .text-xs {
+      font-size: 0.65rem;
+    }
+  }
+</style>
+</head>
+<body class="text-gray-100">
+<div id="app" class="min-h-screen flex flex-col">
+  <!-- Header -->
+  <header class="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 border-b border-slate-700 shadow-2xl">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div class="flex items-center gap-3">
+          <div class="bg-blue-600 p-3 rounded-lg shadow-lg">
+            <i class="fa-solid fa-calendar-check text-2xl"></i>
+          </div>
+          <div>
+            <h1 class="text-3xl font-bold text-white">Agenda de Consultorías</h1>
+            <p class="text-slate-400 text-sm">Sistema de Gestión de Citas Contables</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-3">
+          <button id="btnExport" class="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg font-medium transition-all shadow-lg hover:shadow-green-500/50 flex items-center gap-2">
+            <i class="fa-solid fa-file-excel"></i>
+            Descargar Excel
+          </button>
+          <div class="bg-slate-800 px-5 py-2.5 rounded-lg border border-slate-700">
+            <div class="text-xs text-slate-400">Ingresos del Mes</div>
+            <div id="totalIngresos" class="text-xl font-bold text-green-400">S/ 0.00</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <!-- Controls -->
+    <div class="bg-slate-900 rounded-xl shadow-2xl border border-slate-700 p-5 mb-6">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 items-end">
+        <!-- Month Navigation -->
+        <div class="flex items-center gap-3">
+          <button id="prevMonth" class="bg-slate-800 hover:bg-slate-700 p-3 rounded-lg transition-all border border-slate-600">
+            <i class="fa-solid fa-chevron-left"></i>
+          </button>
+          <div class="flex-1 text-center">
+            <h2 id="currentMonth" class="text-2xl font-bold text-white"></h2>
+            <p class="text-sm text-slate-400">2026</p>
+          </div>
+          <button id="nextMonth" class="bg-slate-800 hover:bg-slate-700 p-3 rounded-lg transition-all border border-slate-600">
+            <i class="fa-solid fa-chevron-right"></i>
+          </button>
+        </div>
+
+        <!-- Filter by Hour -->
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-2">
+            <i class="fa-solid fa-filter mr-2"></i>Filtrar por Hora
+          </label>
+          <div class="flex gap-2">
+            <select id="filterHour" class="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+              <option value="">-- Seleccionar Hora --</option>
+            </select>
+            <button id="clearFilter" class="bg-slate-700 hover:bg-slate-600 px-4 py-2.5 rounded-lg transition-all border border-slate-600">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-slate-800 rounded-lg p-3 border border-slate-700">
+            <div class="text-xs text-slate-400">Citas del Mes</div>
+            <div id="citasCount" class="text-2xl font-bold text-blue-400">0</div>
+          </div>
+          <div class="bg-slate-800 rounded-lg p-3 border border-slate-700">
+            <div class="text-xs text-slate-400">Días con Citas</div>
+            <div id="diasCount" class="text-2xl font-bold text-purple-400">0</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="bg-slate-900 rounded-lg border border-slate-700 p-4 mb-6">
+      <div class="flex flex-wrap gap-4 text-sm">
+        <div class="flex items-center gap-2">
+          <div class="w-4 h-4 rounded bg-gradient-to-br from-blue-900 to-slate-900 border-l-4 border-blue-500"></div>
+          <span class="text-slate-300">Con citas</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="w-4 h-4 rounded bg-slate-800 border-2 border-blue-400"></div>
+          <span class="text-slate-300">Día actual</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="w-4 h-4 rounded bg-gradient-to-br from-green-900 to-slate-900 border-2 border-green-500"></div>
+          <span class="text-slate-300">Disponible en filtro</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="w-4 h-4 rounded bg-gradient-to-br from-red-900 to-slate-900 border-2 border-red-500"></div>
+          <span class="text-slate-300">Ocupado en filtro</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Calendar -->
+    <div class="bg-slate-900 rounded-xl shadow-2xl border border-slate-700 overflow-hidden">
+      <!-- Days Header -->
+      <div class="grid grid-cols-7 bg-slate-800 border-b border-slate-700">
+        <div class="p-3 text-center font-semibold text-slate-300 text-sm">Dom</div>
+        <div class="p-3 text-center font-semibold text-slate-300 text-sm">Lun</div>
+        <div class="p-3 text-center font-semibold text-slate-300 text-sm">Mar</div>
+        <div class="p-3 text-center font-semibold text-slate-300 text-sm">Mié</div>
+        <div class="p-3 text-center font-semibold text-slate-300 text-sm">Jue</div>
+        <div class="p-3 text-center font-semibold text-slate-300 text-sm">Vie</div>
+        <div class="p-3 text-center font-semibold text-slate-300 text-sm">Sáb</div>
+      </div>
+      <!-- Calendar Grid -->
+      <div id="calendarGrid" class="calendar-grid"></div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-slate-900 border-t border-slate-700 mt-auto">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div class="text-center text-slate-400 text-sm">
+        <p>© 2026 Sistema de Agenda de Consultorías</p>
+        <p class="mt-1">hecho por Ever Méndez</p>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<!-- Modal Selector -->
+<div id="selectorModal" class="hidden fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4">
+  <div class="bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 w-full max-w-md overflow-hidden fade-in">
+    <div class="bg-gradient-to-r from-blue-900 to-slate-900 p-6 border-b border-slate-700">
+      <h3 class="text-2xl font-bold text-white flex items-center gap-3">
+        <i class="fa-solid fa-calendar-day text-blue-400"></i>
+        <span>Gestionar Citas</span>
+      </h3>
+      <p id="selectorDate" class="text-slate-300 mt-1"></p>
+    </div>
+    <div class="p-6 space-y-3">
+      <button id="btnAddNew" class="w-full bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-lg font-medium transition-all shadow-lg hover:shadow-blue-500/50 flex items-center justify-center gap-3">
+        <i class="fa-solid fa-plus-circle text-xl"></i>
+        Agregar nueva cita
+      </button>
+      <button id="btnEditExisting" class="w-full bg-purple-600 hover:bg-purple-700 text-white p-4 rounded-lg font-medium transition-all shadow-lg hover:shadow-purple-500/50 flex items-center justify-center gap-3">
+        <i class="fa-solid fa-pen-to-square text-xl"></i>
+        Editar citas registradas
+      </button>
+      <button id="cancelSelector" class="w-full bg-slate-700 hover:bg-slate-600 text-white p-3 rounded-lg font-medium transition-all">
+        Cancelar
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Form -->
+<div id="modal" class="hidden fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4">
+  <div class="bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col fade-in">
+    <!-- Modal Header -->
+    <div class="bg-gradient-to-r from-blue-900 to-slate-900 p-6 border-b border-slate-700">
+      <div class="flex justify-between items-start">
+        <div>
+          <h3 class="text-2xl font-bold text-white flex items-center gap-3">
+            <i class="fa-solid fa-calendar-plus text-blue-400"></i>
+            <span id="modalTitle">Agendar Cita</span>
+          </h3>
+          <p id="modalDate" class="text-slate-300 mt-1"></p>
+        </div>
+        <button id="closeModal" class="text-slate-400 hover:text-white transition-colors">
+          <i class="fa-solid fa-xmark text-2xl"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Modal Body -->
+    <div class="flex-1 overflow-y-auto p-6">
+      <!-- Appointments List -->
+      <div id="appointmentsList" class="mb-6">
+        <h4 class="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+          <i class="fa-solid fa-list-check text-blue-400"></i>
+          Citas del Día
+        </h4>
+        <div id="appointmentsContainer" class="space-y-2"></div>
+      </div>
+
+      <!-- Form -->
+      <div class="border-t border-slate-700 pt-6">
+        <h4 class="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+          <i class="fa-solid fa-file-pen text-green-400"></i>
+          <span id="formTitle">Nueva Cita</span>
+        </h4>
+        <form id="appointmentForm" class="space-y-4">
+          <input type="hidden" id="editId">
+          <input type="hidden" id="selectedDate">
+          
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-2">
+                Hora de la Cita <span class="text-red-500">*</span>
+              </label>
+              <select id="hora" required class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500">
+                <option value="">Seleccione hora</option>
+              </select>
+              <p id="horaError" class="text-red-400 text-xs mt-1 hidden"></p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-2">
+                Monto (S/) <span class="text-red-500">*</span>
+              </label>
+              <input type="number" id="monto" required placeholder="Ej: 50" step="10" min="10"
+                class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500">
+              <p id="montoError" class="text-red-400 text-xs mt-1 hidden">El monto debe ser múltiplo de 10 sin decimales</p>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-2">
+              Modalidad
+            </label>
+            <select id="modalidad" disabled class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-white cursor-not-allowed opacity-75">
+              <option value="Presencial">Presencial</option>
+              <option value="Virtual">Virtual</option>
+            </select>
+            <p class="text-slate-400 text-xs mt-1">
+              <i class="fa-solid fa-circle-info mr-1"></i>
+              La modalidad se asigna automáticamente: Presencial Lun-Vie, Virtual Sáb-Dom
+            </p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-2">
+              Nombre del Cliente <span class="text-red-500">*</span>
+            </label>
+            <input type="text" id="cliente" required placeholder="Nombre completo"
+              class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500">
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-2">
+              DNI o RUC <span class="text-red-500">*</span>
+            </label>
+            <input type="text" id="documento" required placeholder="12345678 o 20123456789"
+              class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500">
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-2">
+              Tema de Consultoría <span class="text-red-500">*</span>
+            </label>
+            <select id="tema" required class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500">
+              <option value="">Seleccione un tema</option>
+            </select>
+          </div>
+
+          <div id="warningMessage" class="hidden bg-amber-900/30 border border-amber-600 rounded-lg p-3 text-amber-200 text-sm">
+            <i class="fa-solid fa-triangle-exclamation mr-2"></i>
+            <span id="warningText"></span>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal Footer -->
+    <div class="bg-slate-800 p-6 border-t border-slate-700 flex gap-3 justify-end">
+      <button id="cancelBtn" class="px-6 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-all">
+        Cancelar
+      </button>
+      <button id="saveBtn" class="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-all shadow-lg hover:shadow-blue-500/50 flex items-center gap-2">
+        <i class="fa-solid fa-save"></i>
+        Guardar Cita
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="hidden fixed top-4 right-4 z-[60] fade-in">
+  <div class="bg-slate-800 border-l-4 border-green-500 rounded-lg shadow-2xl p-4 flex items-center gap-3 min-w-[300px]">
+    <i id="toastIcon" class="fa-solid fa-circle-check text-green-500 text-xl"></i>
+    <div>
+      <p id="toastTitle" class="font-semibold text-white"></p>
+      <p id="toastMessage" class="text-sm text-slate-300"></p>
+    </div>
+  </div>
+</div>
+
+<script>
+const TEMAS_CONSULTORIA = [
+  "Asesoría tributaria integral",
+  "Planeamiento tributario",
+  "Declaración y liquidación de impuestos",
+  "Fiscalización tributaria",
+  "Defensa ante requerimientos de la administración tributaria",
+  "Devolución y compensación de tributos",
+  "Auditoría tributaria preventiva",
+  "Revisión de contingencias tributarias",
+  "Asesoría en IGV",
+  "Asesoría en Impuesto a la Renta",
+  "Asesoría en detracciones, percepciones y retenciones",
+  "Consultoría para regímenes tributarios",
+  "Elaboración de recursos y descargos tributarios",
+  "Asesoría para constitución y formalización de empresas",
+  "Asesoría en contratos laborales",
+  "Elaboración de planillas de remuneraciones",
+  "Cálculo de beneficios sociales"
+];
+
+const HORAS_HABILITADAS = [9, 10, 11, 12, 15, 16, 17, 18];
+const STORAGE_KEY = 'agenda_consultorias_2026';
+
+let currentYear = 2026;
+let currentMonth = 0; // 0-11
+let appointments = [];
+let filteredHour = null;
+
+const monthNames = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+];
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+  loadAppointments();
+  populateSelects();
+  renderCalendar();
+  attachEventListeners();
+  updateStats();
+});
+
+function attachEventListeners() {
+  document.getElementById('prevMonth').addEventListener('click', () => navigateMonth(-1));
+  document.getElementById('nextMonth').addEventListener('click', () => navigateMonth(1));
+  document.getElementById('closeModal').addEventListener('click', closeModal);
+  document.getElementById('cancelBtn').addEventListener('click', closeModal);
+  document.getElementById('saveBtn').addEventListener('click', saveAppointment);
+  document.getElementById('btnExport').addEventListener('click', exportToExcel);
+  document.getElementById('filterHour').addEventListener('change', filterByHour);
+  document.getElementById('clearFilter').addEventListener('click', clearFilter);
+  document.getElementById('monto').addEventListener('input', validateMonto);
+  document.getElementById('hora').addEventListener('change', checkHourConflict);
+  document.getElementById('cancelSelector').addEventListener('click', () => {
+    document.getElementById('selectorModal').classList.add('hidden');
+  });
+  
+  document.getElementById('modal').addEventListener('click', (e) => {
+    if (e.target.id === 'modal') closeModal();
+  });
+  
+  document.getElementById('selectorModal').addEventListener('click', (e) => {
+    if (e.target.id === 'selectorModal') {
+      document.getElementById('selectorModal').classList.add('hidden');
+    }
+  });
+}
+
+function populateSelects() {
+  const horaSelect = document.getElementById('hora');
+  const filterHourSelect = document.getElementById('filterHour');
+  const temaSelect = document.getElementById('tema');
+  
+  HORAS_HABILITADAS.forEach(hora => {
+    const horaStr = `${hora.toString().padStart(2, '0')}:00`;
+    horaSelect.innerHTML += `<option value="${hora}">${horaStr}</option>`;
+    filterHourSelect.innerHTML += `<option value="${hora}">${horaStr}</option>`;
+  });
+  
+  TEMAS_CONSULTORIA.forEach(tema => {
+    temaSelect.innerHTML += `<option value="${tema}">${tema}</option>`;
+  });
+}
+
+function getModalidad(dateStr) {
+  const [year, month, day] = dateStr.split('-');
+  const date = new Date(year, month - 1, day);
+  const dayOfWeek = date.getDay();
+  // 0 = Domingo, 6 = Sábado
+  return (dayOfWeek === 0 || dayOfWeek === 6) ? 'Virtual' : 'Presencial';
+}
+
+function loadAppointments() {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  appointments = stored ? JSON.parse(stored) : [];
+  // Migración: agregar modalidad a citas existentes si no la tienen
+  let needsSave = false;
+  appointments.forEach(app => {
+    if (!app.modalidad) {
+      app.modalidad = getModalidad(app.fecha);
+      needsSave = true;
+    }
+  });
+  if (needsSave) saveAppointments();
+}
+
+function saveAppointments() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(appointments));
+}
+
+function navigateMonth(direction) {
+  currentMonth += direction;
+  if (currentMonth < 0) {
+    currentMonth = 0;
+  } else if (currentMonth > 11) {
+    currentMonth = 11;
+  }
+  renderCalendar();
+  updateStats();
+}
+
+function renderCalendar() {
+  document.getElementById('currentMonth').textContent = monthNames[currentMonth];
+  
+  const firstDay = new Date(currentYear, currentMonth, 1);
+  const lastDay = new Date(currentYear, currentMonth + 1, 0);
+  const prevLastDay = new Date(currentYear, currentMonth, 0);
+  const firstDayOfWeek = firstDay.getDay();
+  const lastDate = lastDay.getDate();
+  const prevLastDate = prevLastDay.getDate();
+  
+  const today = new Date();
+  const isToday = (date) => {
+    return date.getDate() === today.getDate() && 
+           date.getMonth() === today.getMonth() && 
+           date.getFullYear() === today.getFullYear();
+  };
+  
+  let html = '';
+  
+  // Previous month days
+  for (let i = firstDayOfWeek; i > 0; i--) {
+    html += `<div class="calendar-day disabled p-2 text-slate-600">${prevLastDate - i + 1}</div>`;
+  }
+  
+  // Current month days
+  for (let day = 1; day <= lastDate; day++) {
+    const date = new Date(currentYear, currentMonth, day);
+    const dateStr = formatDate(date);
+    const dayAppointments = appointments.filter(a => a.fecha === dateStr);
+    const hasAppointments = dayAppointments.length > 0;
+    
+    let classes = 'calendar-day p-2 cursor-pointer relative';
+    if (hasAppointments) classes += ' has-appointments';
+    if (isToday(date)) classes += ' today';
+    
+    // Apply filter styling
+    if (filteredHour !== null) {
+      const hasFilteredHour = dayAppointments.some(a => parseInt(a.hora) === filteredHour);
+      if (hasFilteredHour) {
+        classes += ' filtered-busy';
+      } else {
+        classes += ' filtered-available';
+      }
+    }
+    
+    html += `
+      <div class="${classes}" data-date="${dateStr}" onclick="openDayModal('${dateStr}')">
+        <div class="font-semibold text-lg mb-1">${day}</div>
+        ${hasAppointments ? `
+          <div class="space-y-1">
+            <div class="text-xs bg-blue-900/50 rounded px-2 py-1 flex items-center gap-1">
+              <i class="fa-solid fa-calendar-days text-blue-400"></i>
+              <span>${dayAppointments.length} cita${dayAppointments.length > 1 ? 's' : ''}</span>
+            </div>
+            ${dayAppointments.slice(0, 2).map(a => `
+              <div class="text-xs text-slate-400 truncate">
+                ${a.hora.padStart(2, '0')}:00 - ${a.cliente}
+              </div>
+            `).join('')}
+            ${dayAppointments.length > 2 ? `<div class="text-xs text-slate-500">+${dayAppointments.length - 2} más</div>` : ''}
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+  
+  // Next month days
+  const remainingDays = 42 - (firstDayOfWeek + lastDate);
+  for (let i = 1; i <= remainingDays; i++) {
+    html += `<div class="calendar-day disabled p-2 text-slate-600">${i}</div>`;
+  }
+  
+  document.getElementById('calendarGrid').innerHTML = html;
+}
+
+function openDayModal(dateStr) {
+  const dayAppointments = appointments.filter(a => a.fecha === dateStr);
+  
+  if (dayAppointments.length > 0) {
+    // Mostrar modal selector
+    document.getElementById('selectorDate').textContent = formatDateLong(dateStr);
+    
+    const btnAdd = document.getElementById('btnAddNew');
+    const btnEdit = document.getElementById('btnEditExisting');
+    
+    // Remover listeners anteriores
+    const newBtnAdd = btnAdd.cloneNode(true);
+    const newBtnEdit = btnEdit.cloneNode(true);
+    btnAdd.parentNode.replaceChild(newBtnAdd, btnAdd);
+    btnEdit.parentNode.replaceChild(newBtnEdit, btnEdit);
+    
+    // Agregar nuevos listeners
+    document.getElementById('btnAddNew').addEventListener('click', () => {
+      document.getElementById('selectorModal').classList.add('hidden');
+      openAppointmentForm(dateStr, false);
+    });
+    
+    document.getElementById('btnEditExisting').addEventListener('click', () => {
+      document.getElementById('selectorModal').classList.add('hidden');
+      openAppointmentForm(dateStr, true);
+    });
+    
+    document.getElementById('selectorModal').classList.remove('hidden');
+  } else {
+    // Abrir directo el formulario
+    openAppointmentForm(dateStr, false);
+  }
+}
+
+function openAppointmentForm(dateStr, showList = true) {
+  document.getElementById('selectedDate').value = dateStr;
+  document.getElementById('modalDate').textContent = formatDateLong(dateStr);
+  document.getElementById('editId').value = '';
+  document.getElementById('formTitle').textContent = 'Nueva Cita';
+  document.getElementById('appointmentForm').reset();
+  document.getElementById('warningMessage').classList.add('hidden');
+  
+  // Asignar modalidad automáticamente
+  document.getElementById('modalidad').value = getModalidad(dateStr);
+  
+  if (showList) {
+    document.getElementById('appointmentsList').style.display = 'block';
+    renderAppointmentsList(dateStr);
+  } else {
+    document.getElementById('appointmentsList').style.display = 'none';
+  }
+  
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.add('hidden');
+  document.getElementById('appointmentForm').reset();
+  document.getElementById('warningMessage').classList.add('hidden');
+  clearValidationErrors();
+}
+
+function renderAppointmentsList(dateStr) {
+  const dayAppointments = appointments.filter(a => a.fecha === dateStr).sort((a, b) => a.hora - b.hora);
+  const container = document.getElementById('appointmentsContainer');
+  
+  if (dayAppointments.length === 0) {
+    container.innerHTML = `
+      <div class="text-center py-8 text-slate-500">
+        <i class="fa-solid fa-calendar-xmark text-4xl mb-3"></i>
+        <p>No hay citas agendadas para este día</p>
+      </div>
+    `;
+    return;
+  }
+  
+  container.innerHTML = dayAppointments.map(app => `
+    <div class="bg-slate-800 border border-slate-700 rounded-lg p-4 hover:border-slate-600 transition-all">
+      <div class="flex justify-between items-start">
+        <div class="flex-1">
+          <div class="flex items-center gap-3 mb-2">
+            <div class="bg-blue-900/50 px-3 py-1 rounded-full text-sm font-bold text-blue-300">
+              ${app.hora.padStart(2, '0')}:00
+            </div>
+            <div class="text-green-400 font-semibold">S/ ${parseFloat(app.monto).toLocaleString('es-PE', {minimumFractionDigits: 2})}</div>
+            <div class="text-xs px-2 py-1 rounded ${app.modalidad === 'Virtual' ? 'bg-purple-900/50 text-purple-300' : 'bg-cyan-900/50 text-cyan-300'}">
+              <i class="fa-solid ${app.modalidad === 'Virtual' ? 'fa-video' : 'fa-building'} mr-1"></i>${app.modalidad}
+            </div>
+          </div>
+          <div class="font-semibold text-white mb-1">${app.cliente}</div>
+          <div class="text-sm text-slate-400 mb-1">
+            <i class="fa-solid fa-id-card mr-1"></i>${app.documento}
+          </div>
+          <div class="text-sm text-slate-300">
+            <i class="fa-solid fa-briefcase mr-1 text-blue-400"></i>${app.tema}
+          </div>
+        <div class="flex gap-2">
+          <button onclick="editAppointment('${app.id}')" class="bg-blue-600 hover:bg-blue-700 p-2 rounded-lg transition-all">
+            <i class="fa-solid fa-pen-to-square"></i>
+          </button>
+          <button onclick="deleteAppointment('${app.id}')" class="bg-red-600 hover:bg-red-700 p-2 rounded-lg transition-all">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function validateMonto() {
+  const montoInput = document.getElementById('monto');
+  const montoError = document.getElementById('montoError');
+  const value = montoInput.value;
+  
+  if (value === '') {
+    montoInput.classList.remove('input-error');
+    montoError.classList.add('hidden');
+    return true;
+  }
+  
+  const numValue = parseFloat(value);
+  const isValid = !isNaN(numValue) && numValue > 0 && numValue % 10 === 0 && Number.isInteger(numValue);
+  
+  if (!isValid) {
+    montoInput.classList.add('input-error');
+    montoError.classList.remove('hidden');
+    return false;
+  } else {
+    montoInput.classList.remove('input-error');
+    montoError.classList.add('hidden');
+    return true;
+  }
+}
+
+function checkHourConflict() {
+  const hora = document.getElementById('hora').value;
+  const dateStr = document.getElementById('selectedDate').value;
+  const editId = document.getElementById('editId').value;
+  const warning = document.getElementById('warningMessage');
+  const warningText = document.getElementById('warningText');
+  
+  if (!hora || !dateStr) return;
+  
+  const conflict = appointments.find(a => 
+    a.fecha === dateStr && 
+    a.hora === hora && 
+    a.id !== editId
+  );
+  
+  if (conflict) {
+    warning.classList.remove('hidden');
+    warningText.textContent = `Ya existe una cita a las ${hora.padStart(2, '0')}:00 con ${conflict.cliente}. Puedes continuar pero considera reprogramar.`;
+  } else {
+    warning.classList.add('hidden');
+  }
+}
+
+function saveAppointment() {
+  const editId = document.getElementById('editId').value;
+  const hora = document.getElementById('hora').value;
+  const cliente = document.getElementById('cliente').value.trim();
+  const documento = document.getElementById('documento').value.trim();
+  const tema = document.getElementById('tema').value;
+  const monto = document.getElementById('monto').value;
+  const fecha = document.getElementById('selectedDate').value;
+  const modalidad = document.getElementById('modalidad').value;
+  
+  clearValidationErrors();
+  
+  let hasError = false;
+  
+  if (!hora) {
+    showFieldError('hora', 'Seleccione una hora');
+    hasError = true;
+  }
+  
+  if (!cliente) {
+    showFieldError('cliente', 'Ingrese el nombre del cliente');
+    hasError = true;
+  }
+  
+  if (!documento) {
+    showFieldError('documento', 'Ingrese DNI o RUC');
+    hasError = true;
+  }
+  
+  if (!tema) {
+    showFieldError('tema', 'Seleccione un tema de consultoría');
+    hasError = true;
+  }
+  
+  if (!validateMonto()) {
+    hasError = true;
+  }
+  
+  if (!monto) {
+    showFieldError('monto', 'Ingrese el monto');
+    hasError = true;
+  }
+  
+  if (hasError) {
+    showToast('error', 'Validación', 'Por favor complete todos los campos correctamente');
+    return;
+  }
+  
+  const appointment = {
+    id: editId || generateId(),
+    fecha,
+    hora,
+    cliente,
+    documento,
+    tema,
+    monto: parseFloat(monto),
+    modalidad
+  };
+  
+  if (editId) {
+    const index = appointments.findIndex(a => a.id === editId);
+    appointments[index] = appointment;
+    showToast('success', 'Actualizado', 'Cita actualizada correctamente');
+  } else {
+    appointments.push(appointment);
+    showToast('success', 'Guardado', 'Cita agendada correctamente');
+  }
+  
+  saveAppointments();
+  renderCalendar();
+  renderAppointmentsList(fecha);
+  updateStats();
+  document.getElementById('appointmentForm').reset();
+  document.getElementById('editId').value = '';
+  document.getElementById('formTitle').textContent = 'Nueva Cita';
+  document.getElementById('modalidad').value = getModalidad(fecha);
+}
+
+function editAppointment(id) {
+  const app = appointments.find(a => a.id === id);
+  if (!app) return;
+  
+  document.getElementById('editId').value = app.id;
+  document.getElementById('hora').value = app.hora;
+  document.getElementById('cliente').value = app.cliente;
+  document.getElementById('documento').value = app.documento;
+  document.getElementById('tema').value = app.tema;
+  document.getElementById('monto').value = app.monto;
+  document.getElementById('modalidad').value = app.modalidad || getModalidad(app.fecha);
+  document.getElementById('formTitle').textContent = 'Editar Cita';
+  
+  document.getElementById('appointmentForm').scrollIntoView({ behavior: 'smooth' });
+}
+
+function deleteAppointment(id) {
+  if (!confirm('¿Está seguro de eliminar esta cita?')) return;
+  
+  const index = appointments.findIndex(a => a.id === id);
+  const fecha = appointments[index].fecha;
+  appointments.splice(index, 1);
+  saveAppointments();
+  renderCalendar();
+  renderAppointmentsList(fecha);
+  updateStats();
+  showToast('success', 'Eliminado', 'Cita eliminada correctamente');
+}
+
+function filterByHour() {
+  const value = document.getElementById('filterHour').value;
+  filteredHour = value ? parseInt(value) : null;
+  renderCalendar();
+  
+  if (filteredHour !== null) {
+    const daysWithHour = new Set(
+      appointments
+        .filter(a => {
+          const date = new Date(a.fecha);
+          return date.getMonth() === currentMonth && parseInt(a.hora) === filteredHour;
+        })
+        .map(a => a.fecha)
+    );
+    showToast('info', 'Filtro Aplicado', `${daysWithHour.size} días con citas a las ${filteredHour.toString().padStart(2, '0')}:00`);
+  }
+}
+
+function clearFilter() {
+  document.getElementById('filterHour').value = '';
+  filteredHour = null;
+  renderCalendar();
+}
+
+function updateStats() {
+  const monthAppointments = appointments.filter(a => {
+    const date = new Date(a.fecha);
+    return date.getMonth() === currentMonth && date.getFullYear() === currentYear;
+  });
+  
+  const uniqueDays = new Set(monthAppointments.map(a => a.fecha)).size;
+  const totalIngresos = monthAppointments.reduce((sum, a) => sum + parseFloat(a.monto), 0);
+  
+  document.getElementById('citasCount').textContent = monthAppointments.length;
+  document.getElementById('diasCount').textContent = uniqueDays;
+  document.getElementById('totalIngresos').textContent = `S/ ${totalIngresos.toLocaleString('es-PE', {minimumFractionDigits: 2})}`;
+}
+
+function exportToExcel() {
+  if (appointments.length === 0) {
+    showToast('error', 'Sin Datos', 'No hay citas para exportar');
+    return;
+  }
+  
+  const data = appointments
+    .sort((a, b) => new Date(a.fecha) - new Date(b.fecha) || a.hora - b.hora)
+    .map(app => ({
+      'Fecha': formatDateDisplay(app.fecha),
+      'Hora': `${app.hora.padStart(2, '0')}:00`,
+      'Modalidad': app.modalidad || 'Presencial',
+      'Cliente': app.cliente,
+      'DNI/RUC': app.documento,
+      'Tema de Consultoría': app.tema,
+      'Monto (S/)': app.monto
+    }));
+  
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  
+  // Auto-size columns
+  const colWidths = [
+    { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 25 }, { wch: 15 }, { wch: 50 }, { wch: 12 }
+  ];
+  ws['!cols'] = colWidths;
+  
+  XLSX.utils.book_append_sheet(wb, ws, 'Citas 2026');
+  XLSX.writeFile(wb, `Control_Citas_Consultorias_2026_${new Date().toISOString().split('T')[0]}.xlsx`);
+  
+  showToast('success', 'Exportado', 'Archivo Excel descargado correctamente');
+}
+
+// Utility Functions
+function formatDate(date) {
+  const d = new Date(date);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatDateDisplay(dateStr) {
+  const [year, month, day] = dateStr.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+function formatDateLong(dateStr) {
+  const [year, month, day] = dateStr.split('-');
+  const date = new Date(year, month - 1, day);
+  const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+  return date.toLocaleDateString('es-ES', options);
+}
+
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2);
+}
+
+function showFieldError(fieldId, message) {
+  const field = document.getElementById(fieldId);
+  field.classList.add('input-error');
+  
+  let errorEl = document.getElementById(fieldId + 'Error');
+  if (errorEl) {
+    errorEl.textContent = message;
+    errorEl.classList.remove('hidden');
+  }
+}
+
+function clearValidationErrors() {
+  ['hora', 'cliente', 'documento', 'tema', 'monto'].forEach(id => {
+    document.getElementById(id).classList.remove('input-error');
+    const errorEl = document.getElementById(id + 'Error');
+    if (errorEl && !errorEl.id.includes('monto')) {
+      errorEl.classList.add('hidden');
+    }
+  });
+}
+
+function showToast(type, title, message) {
+  const toast = document.getElementById('toast');
+  const icon = document.getElementById('toastIcon');
+  const titleEl = document.getElementById('toastTitle');
+  const messageEl = document.getElementById('toastMessage');
+  
+  const icons = {
+    success: 'fa-circle-check',
+    error: 'fa-circle-xmark',
+    info: 'fa-circle-info'
+  };
+  
+  const colors = {
+    success: 'text-green-500 border-green-500',
+    error: 'text-red-500 border-red-500',
+    info: 'text-blue-500 border-blue-500'
+  };
+  
+  icon.className = `fa-solid ${icons[type]} text-xl`;
+  toast.firstElementChild.className = `bg-slate-800 border-l-4 ${colors[type]} rounded-lg shadow-2xl p-4 flex items-center gap-3 min-w-[300px]`;
+  titleEl.textContent = title;
+  messageEl.textContent = message;
+  
+  toast.classList.remove('hidden');
+  setTimeout(() => {
+    toast.classList.add('hidden');
+  }, 3000);
+}
+</script>
+<script>(function(){document.addEventListener("click",function(e){var a=e.target.closest("[data-product-id]");if(!a)return;e.preventDefault();var pid=a.getAttribute("data-product-id");if(pid)parent.postMessage({type:"ecto-artifact-link-click",productId:pid},"*")})})();</script>
+</body>
+</html>
